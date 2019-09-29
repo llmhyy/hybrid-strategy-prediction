@@ -109,7 +109,7 @@ def BiRNN(x, weights, biases, timesteps, num_hidden):
     lstm_bw_cell = rnn.BasicLSTMCell(num_hidden, forget_bias=1.0)
 
     # Get BiRNN cell output
-    outputs, _, _ = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,
+    outputs, output_state_fw, output_state_bw = rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, x,
                                                  dtype=tf.float32)
 
     pred = []
@@ -211,18 +211,13 @@ def Accuracy(outputs, labels):
     return accurate_strategy_pred, error
 
 
-def attention(inputs, attention_size, time_major=False, return_alphas=False):
+def attention(inputs, attention_size, return_alphas=False):
     """
     Attention mechanism layer which reduces Bi-RNN outputs with Attention vector.
 
     Args:
         inputs: The Attention inputs.
-            Matches outputs of RNN/Bi-RNN layer (not final state):
-                In case of RNN, this must be RNN outputs `Tensor`:
-                    If time_major == False (default), this must be a tensor of shape:
-                        `[batch_size, max_time, cell.output_size]`.
-                    If time_major == True, this must be a tensor of shape:
-                        `[max_time, batch_size, cell.output_size]`.
+            Matches outputs of Bi-RNN layer (not final state):
                 In case of Bidirectional RNN, this must be a tuple (outputs_fw, outputs_bw) containing the forward and
                 the backward RNN outputs `Tensor`.
                     If time_major == False (default),
@@ -230,15 +225,9 @@ def attention(inputs, attention_size, time_major=False, return_alphas=False):
                         `[batch_size, max_time, cell_fw.output_size]`
                         and outputs_bw is a `Tensor` shaped:
                         `[batch_size, max_time, cell_bw.output_size]`.
-                    If time_major == True,
-                        outputs_fw is a `Tensor` shaped:
-                        `[max_time, batch_size, cell_fw.output_size]`
-                        and outputs_bw is a `Tensor` shaped:
-                        `[max_time, batch_size, cell_bw.output_size]`.
         attention_size: Linear size of the Attention weights.
         time_major: The shape format of the `inputs` Tensors.
-            If true, these `Tensors` must be shaped `[max_time, batch_size, depth]`.
-            If false, these `Tensors` must be shaped `[batch_size, max_time, depth]`.
+            These `Tensors` must be shaped `[batch_size, max_time, depth]`.
             Using `time_major = True` is a bit more efficient because it avoids
             transposes at the beginning and end of the RNN calculation.  However,
             most TensorFlow data is batch-major, so by default this function
@@ -247,21 +236,16 @@ def attention(inputs, attention_size, time_major=False, return_alphas=False):
             Used for visualization purpose.
     Returns:
         The Attention output `Tensor`.
-        In case of RNN, this will be a `Tensor` shaped:
-            `[batch_size, cell.output_size]`.
         In case of Bidirectional RNN, this will be a `Tensor` shaped:
             `[batch_size, cell_fw.output_size + cell_bw.output_size]`.
     """
 
-    if isinstance(inputs, tuple):
-        # In case of Bi-RNN, concatenate the forward and the backward RNN outputs.
-        inputs = tf.concat(inputs, 2)
+    # In case of Bi-RNN, concatenate the forward and the backward RNN outputs.
+    # [batch_size,timesteps,fw.size()+bw.size()]
+    inputs = tf.convert_to_tensor(inputs)       # [T, B, D]
+    inputs = tf.array_ops.transpose(inputs, [1, 0, 2])  # (T,B,D) => (B,T,D)
 
-    if time_major:
-        # (T,B,D) => (B,T,D)
-        inputs = tf.array_ops.transpose(inputs, [1, 0, 2])
-
-    hidden_size = inputs.shape[2].value  # D value - hidden size of the RNN layer
+    hidden_size = 2*num_hidden_units  # D value - hidden size of the Bi-RNN layer
 
     # Trainable parameters
     w_omega = tf.Variable(tf.random_normal([hidden_size, attention_size], stddev=0.1))
